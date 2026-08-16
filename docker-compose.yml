@@ -1,0 +1,70 @@
+name: ace-lt
+
+# PoC 용 최소 구성
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: ace-lt-mysql
+    restart: unless-stopped
+    ports:
+      - "${MYSQL_PORT:-3308}:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-1234}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ace_lt}
+      TZ: Asia/Seoul
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+09:00
+      - --skip-name-resolve
+      # 측정 중 커넥션 상한에 걸려 실패하지 않도록
+      - --max-connections=500
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - ace-lt-net
+
+  redis:
+    image: redis:8.2
+    container_name: ace-lt-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6380}:6379"
+    # 기본은 영속화 off
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks:
+      - ace-lt-net
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: ace-lt-nginx
+    profiles: ["scale"]
+    ports:
+      - "${NGINX_PORT:-8090}:80"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - ace-lt-net
+
+volumes:
+  mysql-data:
+  redis-data:
+
+networks:
+  ace-lt-net:
+    driver: bridge

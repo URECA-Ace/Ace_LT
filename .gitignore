@@ -1,0 +1,62 @@
+HELP.md
+.gradle
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+bin/
+!**/src/main/**/bin/
+!**/src/test/**/bin/
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+out/
+!**/src/main/**/out/
+!**/src/test/**/out/
+
+### VS Code ###
+.vscode/
+
+.metadata/
+.settings/
+.project
+.classpath
+
+### Docker ###
+.env
+
+### OS ###
+.DS_Store
+Thumbs.db
+
+### Logs ###
+*.log
+logs/
+
+### PoC 측정 산출물 ###
+results/
+*.jtl
+users.csv
+
+# app.sh 가 남기는 PID 파일
+*.pid
+
+### 설계 문서 ###
+docs/*
+
+!docs/results/
+
+### 로컬 도구 ###
+.codegraph/
