@@ -36,8 +36,16 @@ services:
     restart: unless-stopped
     ports:
       - "${REDIS_PORT:-6380}:6379"
-    # 기본은 영속화 off
-    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    # 기본은 영속화 off. 성능 측정에 디스크 I/O 가 섞이면 안 된다
+    # 런타임 CONFIG SET 은 재기동 시 이 command 에 덮여서 AOF 를 로드하지 않는다
+    command:
+      - redis-server
+      - --appendonly
+      - ${REDIS_AOF:-no}
+      - --appendfsync
+      - ${REDIS_FSYNC:-everysec}
+      - --save
+      - ""
     volumes:
       - redis-data:/data
     healthcheck:
