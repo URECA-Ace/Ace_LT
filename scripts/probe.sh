@@ -12,7 +12,8 @@ STOCK="${3:-$((VUS / 2))}"
 HOST="${HOST:-localhost:8080}"
 # 폴러 전용 커넥터
 STAT="${STAT:-localhost:8081}"
-TAG="probe_${VERSION}_${VUS}_$(date +%H%M%S)"
+# run.sh 는 PREFIX=main 으로 불러 본 측정과 탐색을 구분
+TAG="${PREFIX:-probe}_${VERSION}_${VUS}_$(date +%H%M%S)"
 
 cd "$(dirname "$0")/.."
 mkdir -p results
