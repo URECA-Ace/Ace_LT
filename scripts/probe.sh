@@ -30,7 +30,8 @@ POLLER=$!
 trap 'kill $POLLER 2>/dev/null' EXIT
 
 k6 run -q \
-	-e VERSION="$VERSION" -e VUS="$VUS" -e HOST="$HOST" -e TAG="$TAG" -e STOCK="$STOCK" \
+	-e VERSION="$VERSION" -e VUS="$VUS" -e HOST="$HOST" -e HOSTS="${HOSTS:-$HOST}" \
+	-e TAG="$TAG" -e STOCK="$STOCK" \
 	-e SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" \
 	load/issue.js
 

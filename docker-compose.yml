@@ -61,7 +61,9 @@ services:
     container_name: ace-lt-nginx
     profiles: ["scale"]
     ports:
+      # 8090 = 앱 1대(N1, N1-20), 8091 = 앱 2대(N2). arm 전환에 재시작 불필요
       - "${NGINX_PORT:-8090}:80"
+      - "${NGINX_PORT_PAIR:-8091}:81"
     volumes:
       - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
     extra_hosts:

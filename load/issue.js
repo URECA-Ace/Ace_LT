@@ -1,7 +1,9 @@
 import http from 'k6/http';
 import { Trend, Counter } from 'k6/metrics';
 
-const HOST = __ENV.HOST || 'localhost:8080';
+// 쉼표로 여러 대를 주면 VU 를 라운드로빈으로 나눈다 (nginx RR 대체)
+const HOSTS = (__ENV.HOSTS || __ENV.HOST || 'localhost:8080').split(',');
+const HOST = HOSTS[0];
 const VERSION = __ENV.VERSION || 'v0';
 const VUS = parseInt(__ENV.VUS || '1000', 10);
 const TAG = __ENV.TAG || `${VERSION}_${VUS}`;
@@ -32,8 +34,9 @@ const nReject = new Counter('n_reject');
 const nError = new Counter('n_error');
 
 export default function () {
+	const target = HOSTS[(__VU - 1) % HOSTS.length];
 	const res = http.post(
-		`http://${HOST}/${VERSION}/issue?userId=${__VU}`,
+		`http://${target}/${VERSION}/issue?userId=${__VU}`,
 		null,
 		{ timeout: '15s' },
 	);
@@ -59,6 +62,7 @@ export function handleSummary(data) {
 	const out = {
 		tag: TAG,
 		version: VERSION,
+		hosts: HOSTS,
 		vus: VUS,
 		stock: STOCK,
 		sha: SHA,
