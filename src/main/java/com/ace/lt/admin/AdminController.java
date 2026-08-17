@@ -15,6 +15,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 // 측정 제어
@@ -38,13 +39,14 @@ public class AdminController {
 	}
 
 	// 회차 초기화
+	// stock 파라미터는 소량 재고 정확성 검증용
 	@PostMapping("/reset")
-	public Map<String, Object> reset() {
+	public Map<String, Object> reset(
+			@RequestParam(defaultValue = "" + PocKeys.TOTAL_STOCK) int stock) {
 		jdbc.execute("TRUNCATE TABLE issue");
-		jdbc.update("UPDATE stock SET remaining = ? WHERE id = ?",
-				PocKeys.TOTAL_STOCK, PocKeys.STOCK_ID);
+		jdbc.update("UPDATE stock SET remaining = ? WHERE id = ?", stock, PocKeys.STOCK_ID);
 
-		redis.opsForValue().set(PocKeys.STOCK, String.valueOf(PocKeys.TOTAL_STOCK));
+		redis.opsForValue().set(PocKeys.STOCK, String.valueOf(stock));
 		redis.delete(PocKeys.ISSUED);
 
 		return stat();
