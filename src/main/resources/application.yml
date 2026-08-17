@@ -27,6 +27,10 @@ server:
   tomcat:
     threads:
       max: 200
+    accept-count: 20000
+    # 기본 8192
+    # 20,000 부하에서 딱 8192 건만 응답이 돌아온 원인
+    max-connections: 20000
 
 poc:
   instance: ${INSTANCE_ID:app-1}
