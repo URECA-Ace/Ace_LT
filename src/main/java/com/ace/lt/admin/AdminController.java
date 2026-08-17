@@ -2,6 +2,7 @@ package com.ace.lt.admin;
 
 import com.ace.lt.common.InFlightMeter;
 import com.ace.lt.common.PocKeys;
+import com.ace.lt.issue.MemoryQueueDrainer;
 import com.zaxxer.hikari.HikariDataSource;
 import com.zaxxer.hikari.HikariPoolMXBean;
 import java.lang.management.GarbageCollectorMXBean;
@@ -30,14 +31,17 @@ public class AdminController {
 	private final StringRedisTemplate redis;
 	private final DataSource dataSource;
 	private final InFlightMeter inFlight;
+	private final MemoryQueueDrainer queue;
 	private final String instanceId;
 
 	public AdminController(JdbcTemplate jdbc, StringRedisTemplate redis, DataSource dataSource,
-			InFlightMeter inFlight, @Value("${poc.instance}") String instanceId) {
+			InFlightMeter inFlight, MemoryQueueDrainer queue,
+			@Value("${poc.instance}") String instanceId) {
 		this.jdbc = jdbc;
 		this.redis = redis;
 		this.dataSource = dataSource;
 		this.inFlight = inFlight;
+		this.queue = queue;
 		this.instanceId = instanceId;
 	}
 
@@ -46,6 +50,8 @@ public class AdminController {
 	@PostMapping("/reset")
 	public Map<String, Object> reset(
 			@RequestParam(defaultValue = "" + PocKeys.TOTAL_STOCK) int stock) {
+		// 앞 회차 잔량이 다음 회차 DB 에 섞이지 않도록 TRUNCATE 보다 먼저
+		queue.clear();
 		jdbc.execute("TRUNCATE TABLE issue");
 		jdbc.update("UPDATE stock SET remaining = ? WHERE id = ?", stock, PocKeys.STOCK_ID);
 
@@ -74,6 +80,9 @@ public class AdminController {
 		// poolPending 은 tomcat threads 에서 포화해 못 잰다
 		stat.put("inFlight", inFlight.current());
 		stat.put("inFlightPeak", inFlight.peak());
+
+		// v2 미처리 잔량(응답은 갔는데 아직 저장 안 된 건수)
+		stat.put("queueSize", queue.size());
 
 		addPoolStat(stat);
 		addJvmStat(stat);

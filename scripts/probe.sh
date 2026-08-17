@@ -31,8 +31,20 @@ k6 run -q \
 	-e SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" \
 	load/issue.js
 
-sleep 3   # 비동기 저장(v2/v3)이 따라잡을 시간
+# 비동기 저장이 따라잡을 때까지 대기 - 응답 이후의 지연
+DRAIN_START=$(python3 -c 'import time;print(int(time.time()*1000))')
+for _ in $(seq 1 300); do
+	PENDING=$(curl -s "http://$HOST/stat" | python3 -c \
+		'import sys,json;d=json.load(sys.stdin);print(d.get("queueSize",0)+d.get("streamPending",0))' 2>/dev/null || echo 0)
+	[ "$PENDING" = "0" ] && break
+	sleep 0.2
+done
+DRAIN_MS=$(( $(python3 -c 'import time;print(int(time.time()*1000))') - DRAIN_START ))
+
+sleep 1
 kill $POLLER 2>/dev/null
 curl -s "http://$HOST/stat" > "results/${TAG}_stat.json"
 
 python3 scripts/probe-report.py "results/${TAG}.json" "results/${TAG}_stat.json" "results/${TAG}_timeline.ndjson"
+echo "  드레인 대기 ${DRAIN_MS}ms - 응답 이후 저장 완료까지 (비동기가 지불하는 대가)"
+echo

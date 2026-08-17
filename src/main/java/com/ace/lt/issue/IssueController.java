@@ -13,10 +13,12 @@ public class IssueController {
 
 	private final V0IssueService v0;
 	private final V1IssueService v1;
+	private final V2IssueService v2;
 
-	public IssueController(V0IssueService v0, V1IssueService v1) {
+	public IssueController(V0IssueService v0, V1IssueService v1, V2IssueService v2) {
 		this.v0 = v0;
 		this.v1 = v1;
+		this.v2 = v2;
 	}
 
 	// SOLD_OUT 은 예외를 쓰지 X
@@ -37,9 +39,15 @@ public class IssueController {
 		return toResponse(v1.issue(userId));
 	}
 
+	@PostMapping("/v2/issue")
+	public ResponseEntity<IssueResponse> v2(@RequestParam long userId) {
+		return toResponse(v2.issue(userId));
+	}
+
 	private ResponseEntity<IssueResponse> toResponse(IssueResponse body) {
 		return switch (body.code()) {
 			case "ISSUED" -> ResponseEntity.ok(body);
+			case "ACCEPTED" -> ResponseEntity.accepted().body(body);
 			case "ERROR" -> ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(body);
 			default -> ResponseEntity.status(HttpStatus.CONFLICT).body(body);
 		};
