@@ -12,9 +12,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class IssueController {
 
 	private final V0IssueService v0;
+	private final V1IssueService v1;
 
-	public IssueController(V0IssueService v0) {
+	public IssueController(V0IssueService v0, V1IssueService v1) {
 		this.v0 = v0;
+		this.v1 = v1;
 	}
 
 	// SOLD_OUT 은 예외를 쓰지 X
@@ -26,8 +28,20 @@ public class IssueController {
 					: ResponseEntity.status(HttpStatus.CONFLICT).body(IssueResponse.SOLD_OUT);
 		}
 		catch (DuplicateKeyException e) {
-			// 트랜잭션 프록시를 빠져나오며 이미 롤백됨
 			return ResponseEntity.status(HttpStatus.CONFLICT).body(IssueResponse.DUPLICATE);
 		}
+	}
+
+	@PostMapping("/v1/issue")
+	public ResponseEntity<IssueResponse> v1(@RequestParam long userId) {
+		return toResponse(v1.issue(userId));
+	}
+
+	private ResponseEntity<IssueResponse> toResponse(IssueResponse body) {
+		return switch (body.code()) {
+			case "ISSUED" -> ResponseEntity.ok(body);
+			case "ERROR" -> ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(body);
+			default -> ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+		};
 	}
 }

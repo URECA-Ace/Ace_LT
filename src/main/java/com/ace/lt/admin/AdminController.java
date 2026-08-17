@@ -1,5 +1,6 @@
 package com.ace.lt.admin;
 
+import com.ace.lt.common.InFlightMeter;
 import com.ace.lt.common.PocKeys;
 import com.zaxxer.hikari.HikariDataSource;
 import com.zaxxer.hikari.HikariPoolMXBean;
@@ -28,13 +29,15 @@ public class AdminController {
 	private final JdbcTemplate jdbc;
 	private final StringRedisTemplate redis;
 	private final DataSource dataSource;
+	private final InFlightMeter inFlight;
 	private final String instanceId;
 
 	public AdminController(JdbcTemplate jdbc, StringRedisTemplate redis, DataSource dataSource,
-			@Value("${poc.instance}") String instanceId) {
+			InFlightMeter inFlight, @Value("${poc.instance}") String instanceId) {
 		this.jdbc = jdbc;
 		this.redis = redis;
 		this.dataSource = dataSource;
+		this.inFlight = inFlight;
 		this.instanceId = instanceId;
 	}
 
@@ -48,6 +51,7 @@ public class AdminController {
 
 		redis.opsForValue().set(PocKeys.STOCK, String.valueOf(stock));
 		redis.delete(PocKeys.ISSUED);
+		inFlight.reset();
 
 		return stat();
 	}
@@ -65,6 +69,11 @@ public class AdminController {
 
 		stat.put("redisRemaining", redisRemaining());
 		stat.put("redisIssuedBits", issuedBitCount());
+
+		// 서버가 실제로 겪은 동시성
+		// poolPending 은 tomcat threads 에서 포화해 못 잰다
+		stat.put("inFlight", inFlight.current());
+		stat.put("inFlightPeak", inFlight.peak());
 
 		addPoolStat(stat);
 		addJvmStat(stat);

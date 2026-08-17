@@ -62,7 +62,10 @@ def main(k6_path, stat_path, timeline_path):
         peak_old = max(t.get("oldGenUsedMb", 0) for t in timeline)
         gc0, gc1 = timeline[0].get("gcTimeMs", 0), timeline[-1].get("gcTimeMs", 0)
         span = (timeline[-1]["ts"] - timeline[0]["ts"]) or 1
-        print(f"\n  poolPending 최대 {peak_pending}   oldGen 최대 {peak_old}MB")
+        peak_inflight = max(t.get("inFlightPeak", 0) for t in timeline)
+        print(f"\n  서버가 겪은 동시성 최대 {peak_inflight} / 쏜 VU {k6['vus']}"
+              f"  ({100 * peak_inflight / k6['vus']:.0f}%)")
+        print(f"  poolPending 최대 {peak_pending} (tomcat threads 에서 포화)   oldGen 최대 {peak_old}MB")
         print(f"  GC 비율 {100 * (gc1 - gc0) / span:.2f}%  (1% 미만이면 병목 아님)")
 
     warn = []
