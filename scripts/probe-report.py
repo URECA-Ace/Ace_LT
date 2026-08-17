@@ -62,6 +62,26 @@ def main(k6_path, stat_path, timeline_path):
         peak_old = max(t.get("oldGenUsedMb", 0) for t in timeline)
         gc0, gc1 = timeline[0].get("gcTimeMs", 0), timeline[-1].get("gcTimeMs", 0)
         span = (timeline[-1]["ts"] - timeline[0]["ts"]) or 1
+        # 저장 계층이 실제로 밀렸는지
+        # streamPending 을 쓰면 X
+        # relay 가 배달받은 것만 세므로 배치 크기(500)에서 상한이 걸림
+        # 아직 안 읽은 엔트리가 진짜 -> streamLen - dbIssued
+        peak_backlog = max(
+            max(t.get("queueSize", 0), t.get("streamLen", 0) - t["dbIssued"], 0)
+            for t in timeline)
+        db_series = [(t["ts"], t["dbIssued"]) for t in timeline]
+        rate = 0
+        if len(db_series) >= 2:
+            sec = (db_series[-1][0] - db_series[0][0]) / 1000 or 1
+            rate = (db_series[-1][1] - db_series[0][1]) / sec
+        print(f"\n  저장 처리율 {rate:.0f}/s", end="")
+        if k6["version"] in ("v2", "v3"):
+            print(f"   저장 적체 최대 {peak_backlog}건")
+            if peak_backlog < 100:
+                print("  ! 적체 거의 없음 - 저장 계층이 밀리지 않았다")
+        else:
+            print("   (동기라 적체 개념 없음)")
+
         peak_inflight = max(t.get("inFlightPeak", 0) for t in timeline)
         print(f"\n  서버가 겪은 동시성 최대 {peak_inflight} / 쏜 VU {k6['vus']}"
               f"  ({100 * peak_inflight / k6['vus']:.0f}%)")
