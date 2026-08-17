@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""탐색 측정 요약 출력. 본 측정 리포트는 parse.py 가 따로 만든다."""
+import json
+import sys
+
+
+def ms(v):
+    return "-" if v is None else f"{v:>8.1f}"
+
+
+def main(k6_path, stat_path, timeline_path):
+    k6 = json.load(open(k6_path))
+    stat = json.load(open(stat_path))
+
+    timeline = []
+    with open(timeline_path) as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                try:
+                    timeline.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+
+    c = k6["count"]
+    total = c["success"] + c["reject"] + c["error"]
+    err_rate = 100 * c["error"] / total if total else 0
+
+    print(f"\n=== 탐색 측정 {k6['tag']}  (sha {k6['sha']}) — 본 측정 아님 ===\n")
+
+    print(f"  요청 {total}  성공 {c['success']}  거절 {c['reject']}  에러 {c['error']} ({err_rate:.0f}%)")
+    print(f"  소요 {k6['elapsedSec']:.1f}s   유효 TPS {k6['tps']:.0f}   (닫힌 모델 — '초당 처리량' 아님)")
+
+    # 타임아웃이 섞이면 p99 는 잘린 값
+    # TPS 도 좋아 보인다 (coordinated omission)
+    if err_rate >= 5:
+        print(f"  !! 에러율 {err_rate:.0f}% — p99/TPS 해석 금지. 응답 못 받은 요청이 통계에서 빠져")
+        print("     느린 요청일수록 잘려나가 오히려 좋아 보인다")
+
+    print("\n  TTFB(http_req_waiting) ms")
+    print("            p95      p99      max")
+    for label, key in (("성공", "success"), ("거절", "reject")):
+        w = k6["waitMs"][key]
+        print(f"    {label}  {ms(w['p95'])} {ms(w['p99'])} {ms(w['max'])}")
+
+    stock = k6.get("stock", 10000)
+    print(f"\n  정확성  dbIssued {stat['dbIssued']} / 재고 {stock}"
+          f"   dbRemaining {stat['dbRemaining']}   redisRemaining {stat['redisRemaining']}")
+    if stat["dbIssued"] > stock:
+        print("  !! 초과 발급 - 성능 수치는 무의미. 원인부터")
+
+    gap = c["success"] - stat["dbIssued"]
+    if gap > 0:
+        print(f"  유실  성공응답 {c['success']} - dbIssued {stat['dbIssued']} = {gap}")
+        print("        발급했다고 응답해놓고 저장은 안 됨")
+    elif gap < 0:
+        print(f"  미수신  dbIssued {stat['dbIssued']} - 성공응답 {c['success']} = {-gap}")
+        print("        서버는 저장했는데 클라이언트가 타임아웃으로 포기 (유실 아님)")
+
+    if timeline:
+        peak_pending = max(t.get("poolPending", 0) for t in timeline)
+        peak_old = max(t.get("oldGenUsedMb", 0) for t in timeline)
+        gc0, gc1 = timeline[0].get("gcTimeMs", 0), timeline[-1].get("gcTimeMs", 0)
+        span = (timeline[-1]["ts"] - timeline[0]["ts"]) or 1
+        print(f"\n  poolPending 최대 {peak_pending}   oldGen 최대 {peak_old}MB")
+        print(f"  GC 비율 {100 * (gc1 - gc0) / span:.2f}%  (1% 미만이면 병목 아님)")
+
+    warn = []
+    if c["dropped"]:
+        print(f"\n  !! dropped_iterations {c['dropped']} - 부하 생성기가 먼저 무너짐. 회차 폐기")
+    if k6["durationMs"]["blockedP99"] and k6["durationMs"]["blockedP99"] > 1:
+        warn.append(f"http_req_blocked p99 {k6['durationMs']['blockedP99']:.1f}ms — 클라이언트가 커넥션 대기")
+    for w in warn:
+        print(f"  ! {w}")
+    print()
+
+
+if __name__ == "__main__":
+    main(*sys.argv[1:4])
