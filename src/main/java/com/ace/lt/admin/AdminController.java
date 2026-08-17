@@ -3,6 +3,7 @@ package com.ace.lt.admin;
 import com.ace.lt.common.InFlightMeter;
 import com.ace.lt.common.PocKeys;
 import com.ace.lt.issue.MemoryQueueDrainer;
+import com.ace.lt.issue.StreamRelay;
 import com.zaxxer.hikari.HikariDataSource;
 import com.zaxxer.hikari.HikariPoolMXBean;
 import java.lang.management.GarbageCollectorMXBean;
@@ -13,6 +14,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import javax.sql.DataSource;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.connection.stream.PendingMessagesSummary;
+import org.springframework.data.redis.connection.stream.ReadOffset;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -32,16 +36,18 @@ public class AdminController {
 	private final DataSource dataSource;
 	private final InFlightMeter inFlight;
 	private final MemoryQueueDrainer queue;
+	private final StreamRelay relay;
 	private final String instanceId;
 
 	public AdminController(JdbcTemplate jdbc, StringRedisTemplate redis, DataSource dataSource,
-			InFlightMeter inFlight, MemoryQueueDrainer queue,
+			InFlightMeter inFlight, MemoryQueueDrainer queue, StreamRelay relay,
 			@Value("${poc.instance}") String instanceId) {
 		this.jdbc = jdbc;
 		this.redis = redis;
 		this.dataSource = dataSource;
 		this.inFlight = inFlight;
 		this.queue = queue;
+		this.relay = relay;
 		this.instanceId = instanceId;
 	}
 
@@ -57,9 +63,25 @@ public class AdminController {
 
 		redis.opsForValue().set(PocKeys.STOCK, String.valueOf(stock));
 		redis.delete(PocKeys.ISSUED);
+		redis.delete(PocKeys.STREAM);
+		createGroup();
 		inFlight.reset();
+		relay.onReset();
 
 		return stat();
+	}
+
+	private void createGroup() {
+		redis.execute((RedisCallback<Object>) conn -> conn.streamCommands().xGroupCreate(
+				PocKeys.STREAM.getBytes(StandardCharsets.UTF_8),
+				PocKeys.GROUP, ReadOffset.from("0"), true));
+	}
+
+	// 소비자 장애만 격리해서 재처리 수렴
+	@PostMapping("/admin/relay")
+	public Map<String, Object> relay(@RequestParam boolean enabled) {
+		relay.setEnabled(enabled);
+		return Map.of("relayEnabled", relay.isEnabled());
 	}
 
 	// 측정 지표 스냅샷
@@ -84,6 +106,11 @@ public class AdminController {
 		// v2 미처리 잔량(응답은 갔는데 아직 저장 안 된 건수)
 		stat.put("queueSize", queue.size());
 
+		// v3 - streamPending 이 미ACK 잔량(재기동 후 여기서 처리)
+		stat.put("streamLen", streamLen());
+		stat.put("streamPending", streamPending());
+		stat.put("relayEnabled", relay.isEnabled());
+
 		addPoolStat(stat);
 		addJvmStat(stat);
 		return stat;
@@ -97,6 +124,23 @@ public class AdminController {
 	private Long issuedBitCount() {
 		return redis.execute(conn -> conn.stringCommands()
 				.bitCount(PocKeys.ISSUED.getBytes(StandardCharsets.UTF_8)), true);
+	}
+
+	private long streamLen() {
+		Long size = redis.opsForStream().size(PocKeys.STREAM);
+		return size == null ? 0 : size;
+	}
+
+	private long streamPending() {
+		try {
+			PendingMessagesSummary summary =
+					redis.opsForStream().pending(PocKeys.STREAM, PocKeys.GROUP);
+			return summary == null ? 0 : summary.getTotalPendingMessages();
+		}
+		catch (RuntimeException e) {
+			// 그룹이 아직 없으면 0
+			return 0;
+		}
 	}
 
 	private void addPoolStat(Map<String, Object> stat) {

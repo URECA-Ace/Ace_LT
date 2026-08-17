@@ -2,6 +2,7 @@ package com.ace.lt.issue;
 
 import com.ace.lt.common.PocKeys;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
@@ -19,7 +20,8 @@ public class V1IssueService {
 	private final IssuePersistenceService persistence;
 	private final IssueCompensator compensator;
 
-	public V1IssueService(StringRedisTemplate redis, RedisScript<Long> issueScript,
+	public V1IssueService(StringRedisTemplate redis,
+			@Qualifier("issueScript") RedisScript<Long> issueScript,
 			IssuePersistenceService persistence, IssueCompensator compensator) {
 		this.redis = redis;
 		this.issueScript = issueScript;

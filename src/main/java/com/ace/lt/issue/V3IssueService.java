@@ -7,29 +7,27 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Service;
 
-// v2: Redis Lua 판정 + 비동기 저장
-// 저장을 기다리지 않고 202 로 끊음
+// v3: Redis Lua 판정 + Outbox
+// v2 와 큐만 다름
 @Service
-public class V2IssueService {
+public class V3IssueService {
 
 	private static final long DUPLICATE = -1L;
 	private static final long SOLD_OUT = -2L;
 
 	private final StringRedisTemplate redis;
-	private final RedisScript<Long> issueScript;
-	private final MemoryQueueDrainer queue;
+	private final RedisScript<Long> issueStreamScript;
 
-	public V2IssueService(StringRedisTemplate redis,
-			@Qualifier("issueScript") RedisScript<Long> issueScript,
-			MemoryQueueDrainer queue) {
+	public V3IssueService(StringRedisTemplate redis,
+			@Qualifier("issueStreamScript") RedisScript<Long> issueStreamScript) {
 		this.redis = redis;
-		this.issueScript = issueScript;
-		this.queue = queue;
+		this.issueStreamScript = issueStreamScript;
 	}
 
 	public IssueResponse issue(long userId) {
-		Long code = redis.execute(issueScript,
-				List.of(PocKeys.STOCK, PocKeys.ISSUED), String.valueOf(userId));
+		Long code = redis.execute(issueStreamScript,
+				List.of(PocKeys.STOCK, PocKeys.ISSUED, PocKeys.STREAM),
+				String.valueOf(userId));
 
 		if (code == null) {
 			return IssueResponse.ERROR;
@@ -40,8 +38,6 @@ public class V2IssueService {
 		if (code == SOLD_OUT) {
 			return IssueResponse.SOLD_OUT;
 		}
-
-		queue.offer(userId);
 		return IssueResponse.ACCEPTED;
 	}
 }
