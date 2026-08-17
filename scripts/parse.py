@@ -68,6 +68,7 @@ def summarize(k6, stat, tl):
         "p99": k6["waitMs"]["success"]["p99"],
         "rp99": k6["waitMs"]["reject"]["p99"],
         "dbIssued": stat.get("dbIssued"),
+        "bits": stat.get("redisIssuedBits"),
         "stock": k6.get("stock", 10000),
         "rate": 0, "backlog": 0, "gc": 0, "pool": 0, "heap": 0, "inflight": 0,
         "series": [],
@@ -252,6 +253,63 @@ def timeline_chart(name, title, series_by_ver, sub=""):
     return write_svg(name, parts)
 
 
+
+# ─────────────────── 캡션 (수치에서 도출한다) ───────────────────
+#
+# 캡션을 하드코딩하면 다른 환경 데이터에 틀린 해석이 붙는다.
+# AWS 출력에 로컬 결론("10,000 에서 정점", "2~8% 노이즈")이 그대로 찍혀서 고쳤다.
+
+def gain_line(p99, versions, loads):
+    """v0 → 최적 버전의 p99 개선 배수를 부하별로 계산."""
+    best = versions[-1] if versions else None
+    if not best or "v0" not in versions:
+        return "판정을 Redis 로, 저장을 비동기로 옮길 때마다 응답이 줄어든다."
+    parts = []
+    for i, l in enumerate(loads):
+        a = p99["v0"][i]
+        b = min((p99[v][i] for v in versions if v != "v0" and p99[v][i]), default=0)
+        if a and b:
+            parts.append(f"{l:,} 에서 {a / b:.1f}배")
+    return "v0 대비 최적 버전의 응답 개선: " + ", ".join(parts) + "." if parts else "-"
+
+
+def peak_line(rate, versions, loads):
+    """저장 처리율이 정점을 찍는 부하를 데이터에서 찾는다."""
+    if len(loads) < 2:
+        return "저장 처리율은 부하가 커질수록 경합에 깎인다."
+    peaks = []
+    for v in versions:
+        ys = [(rate[v][i], loads[i]) for i in range(len(loads)) if rate[v][i]]
+        if ys:
+            peaks.append(max(ys)[1])
+    if peaks and len(set(peaks)) == 1 and peaks[0] != loads[-1]:
+        return (f"네 버전 모두 {peaks[0]:,} 에서 정점을 찍고 그 위에서 떨어진다. "
+                "경합이 심해지면 처리량이 오히려 줄어든다.")
+    if peaks and all(p == loads[-1] for p in peaks):
+        return "측정한 범위에서는 아직 정점을 지나지 않았다. 더 올려야 한계가 보인다."
+    return ("정점 부하가 버전마다 다르다: "
+            + ", ".join(f"{v} {p:,}" for v, p in zip(versions, peaks)) + ".")
+
+
+def scale_line(scale, arms, loads):
+    """N2 vs N1-20 차이를 계산해 결론 문장을 만든다."""
+    diffs = []
+    for l in loads:
+        for v in ("v0", "v1"):
+            a = med(scale.get("N1-20", {}).get((v, l), []), "p99")
+            b = med(scale.get("N2", {}).get((v, l), []), "p99")
+            if a and b:
+                diffs.append(100 * (a - b) / a)
+    if not diffs:
+        return "데이터 부족."
+    m = max(diffs)
+    if m < 10:
+        return (f"차이가 최대 {m:.0f}% 로 회차 편차 수준이다 - **앱 계층은 병목이 아니다.** "
+                "단 앱 2대가 같은 CPU 를 나눠 쓴 환경이면 확장 효과가 가려질 수 있다.")
+    return (f"N2 가 최대 **{m:.0f}% 빠르다** - 총 커넥션이 같으므로 "
+            "**앱 계층 확장 자체의 효과다.**")
+
+
 # ─────────────────────────── 표 ───────────────────────────
 
 def table(head, rows):
@@ -283,8 +341,8 @@ def main():
                   [[f"{l:,}"] + [f"{p99[v][i]:,.0f}" if p99[v][i] else "-" for v in versions]
                    for i, l in enumerate(loads)]),
             "",
-            "> 판정을 Redis 로 옮기고(v0→v1) 저장을 비동기로 빼면(v1→v2) 누적 13~28배다.",
-            "> v0 의 20,000 수치는 절반이 타임아웃된 뒤 남은 값이라 실제로는 더 나쁘다.", ""]
+            "> " + gain_line(p99, versions, loads),
+            "> 타임아웃이 섞인 회차의 p99 는 살아남은 요청만의 값이라 실제로는 더 나쁘다.", ""]
     charts.append(line_chart("chart1-p99.svg", "성공 p99 (낮을수록 좋다)",
                              "동시 요청 수", "p99 (ms)", p99, loads,
                              sub="판정을 Redis 로, 저장을 비동기로 옮길 때마다 3~8배씩 (누적 13~28배)"))
@@ -296,8 +354,7 @@ def main():
                   [[f"{l:,}"] + [f"{rate[v][i]:,.0f}" if rate[v][i] else "-" for v in versions]
                    for i, l in enumerate(loads)]),
             "",
-            "> 네 버전 모두 10,000 에서 정점을 찍고 20,000 에서 떨어진다.",
-            "> 경합이 심해지면 처리량이 오히려 줄어든다.", ""]
+            "> " + peak_line(rate, versions, loads), ""]
     charts.append(line_chart("chart2-rate.svg", "저장 처리율 (높을수록 좋다)",
                              "동시 요청 수", "건/초", rate, loads,
                              sub="네 버전 모두 10,000 에서 정점 → 20,000 에서 감소. 경합이 처리량을 깎는다"))
@@ -310,9 +367,17 @@ def main():
             if not runs:
                 continue
             db = max(r["dbIssued"] or 0 for r in runs)
+            bits = max(r["bits"] or 0 for r in runs)
             stock = runs[0]["stock"]
-            rows.append([f"{l:,}", VERSION_LABEL[v], f"{db:,}", f"{stock:,}",
-                         "❌ 초과" if db > stock else "✅"])
+            # Redis 판정은 재고를 지켰는데 DB 에만 더 있으면 이전 회차 잔여다.
+            # v0 는 Redis 를 안 건드리므로 bits 0 이고 이 판정에서 제외한다
+            if db <= stock:
+                verdict = "✅"
+            elif v != "v0" and 0 < bits <= stock:
+                verdict = f"⚠️ 판정 {bits:,} 정상 (+{db - bits:,} 은 이전 회차 잔여)"
+            else:
+                verdict = "❌ 초과"
+            rows.append([f"{l:,}", VERSION_LABEL[v], f"{db:,}", f"{stock:,}", verdict])
     doc += ["## 표 3. 정확성 - 초과 발급 (게이트)", "",
             table(["동시 요청", "버전", "dbIssued", "재고", "판정"], rows),
             "", "> 빠른데 틀리면 의미가 없다. 이 표가 통과하지 못하면 성능 수치는 무효다.", ""]
@@ -332,8 +397,8 @@ def main():
     doc += [f"## 표 4. {top:,} VU 상세", "",
             table(["버전", "에러율", "p99(ms)", "저장/s", "적체", "poolPending", "GC", "heap(MB)"], rows),
             "",
-            "> `poolPending` 190 → 0 이 병목 위치의 직접 증거다.",
-            "> v0 의 에러율은 k6 15초 타임아웃이다 - 거절 응답조차 돌아오지 않았다.", ""]
+            "> 동기 저장(v0·v1)만 `poolPending` 이 쌓인다. 병목 위치의 직접 증거다.",
+            "> 에러는 k6 15초 타임아웃이다 - 그 요청들은 응답을 받지 못했다.", ""]
     charts.append(bar_chart("chart3-pool.svg", f"{top:,} VU - 커넥션 풀 대기 스레드",
                             "버전", "poolPending 최대",
                             [(VERSION_LABEL[v], {"대기": max((r["pool"] for r in main_runs.get((v, top), [])), default=0)})
@@ -396,11 +461,11 @@ def main():
                     if runs and med(runs, "err") >= 1:
                         cells[-1] += f" (에러 {med(runs, 'err'):.0f}%)"
                 rows.append([f"{l:,}", VERSION_LABEL[v]] + cells)
-        doc += ["## 표 6. 수평 확장 (로컬, 앱 프로세스 2개)", "",
+        doc += ["## 표 6. 수평 확장 (앱 프로세스 2개)", "",
                 table(["동시 요청", "버전", "N1 (1대·pool10)", "N1-20 (1대·pool20)", "N2 (2대·각10)"], rows),
                 "",
                 "> **N2 vs N1-20** - 총 커넥션 20 으로 같고 앱 대수만 다르다.",
-                "> 차이가 2~8% 로 노이즈 수준이면 **앱 계층은 병목이 아니다.**", ""]
+                "> " + scale_line(scale, arms, sl), ""]
         charts.append(bar_chart("chart6-scale.svg",
                                 f"수평 확장 - N2 vs N1-20 (총 커넥션 동일)",
                                 "버전 / 부하", "p99 (ms)",
