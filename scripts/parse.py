@@ -8,8 +8,11 @@ from collections import defaultdict
 from glob import glob
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RES = os.path.join(ROOT, "results")
-OUT = os.path.join(ROOT, "docs", "results")
+# AWS 결과도 같은 스크립트로 만든다
+#   RES_DIR=results-aws OUT_DIR=docs/results-aws MAIN_PREFIX=aws python3 scripts/parse.py
+RES = os.path.join(ROOT, os.environ.get("RES_DIR", "results"))
+OUT = os.path.join(ROOT, os.environ.get("OUT_DIR", "docs/results"))
+MAIN = os.environ.get("MAIN_PREFIX", "main")
 
 VERSION_LABEL = {
     "v0": "v0 MySQL 락",
@@ -259,23 +262,23 @@ def table(head, rows):
 
 
 def main():
-    main_runs = load_runs("main")
+    main_runs = load_runs(MAIN)
     if not main_runs:
-        print("results/main_*.json 이 없다. ./scripts/run.sh 를 먼저 돌릴 것")
+        print(f"{RES}/{MAIN}_*.json 이 없다")
         return
 
     versions = [v for v in ("v0", "v1", "v2", "v3")
                 if any(k[0] == v for k in main_runs)]
     loads = sorted({k[1] for k in main_runs})
-    doc = ["# 측정 결과 표·그래프",
+    doc = ["# 측정 결과 표 & 그래프",
            "",
-           "`scripts/parse.py` 자동 생성. 원본은 `results/` (미추적).",
+           f"> 이 파일은 `scripts/parse.py` 생성물이다. 손으로 고치면 다음 실행에 덮인다. raw: `{os.path.basename(RES)}/`",
            ""]
     charts = []
 
     # 표 1 · 그래프 1 - p99
     p99 = {v: [med(main_runs.get((v, l), []), "p99") for l in loads] for v in versions}
-    doc += ["## 표 1. 성공 p99 (ms) — TTFB", "",
+    doc += ["## 표 1. 성공 p99 (ms) - TTFB", "",
             table(["동시 요청"] + [VERSION_LABEL[v] for v in versions],
                   [[f"{l:,}"] + [f"{p99[v][i]:,.0f}" if p99[v][i] else "-" for v in versions]
                    for i, l in enumerate(loads)]),
@@ -310,7 +313,7 @@ def main():
             stock = runs[0]["stock"]
             rows.append([f"{l:,}", VERSION_LABEL[v], f"{db:,}", f"{stock:,}",
                          "❌ 초과" if db > stock else "✅"])
-    doc += ["## 표 3. 정확성 — 초과 발급 (게이트)", "",
+    doc += ["## 표 3. 정확성 - 초과 발급 (게이트)", "",
             table(["동시 요청", "버전", "dbIssued", "재고", "판정"], rows),
             "", "> 빠른데 틀리면 의미가 없다. 이 표가 통과하지 못하면 성능 수치는 무효다.", ""]
 
@@ -330,8 +333,8 @@ def main():
             table(["버전", "에러율", "p99(ms)", "저장/s", "적체", "poolPending", "GC", "heap(MB)"], rows),
             "",
             "> `poolPending` 190 → 0 이 병목 위치의 직접 증거다.",
-            "> v0 의 에러율은 k6 15초 타임아웃이다 — 거절 응답조차 돌아오지 않았다.", ""]
-    charts.append(bar_chart("chart3-pool.svg", f"{top:,} VU — 커넥션 풀 대기 스레드",
+            "> v0 의 에러율은 k6 15초 타임아웃이다 - 거절 응답조차 돌아오지 않았다.", ""]
+    charts.append(bar_chart("chart3-pool.svg", f"{top:,} VU - 커넥션 풀 대기 스레드",
                             "버전", "poolPending 최대",
                             [(VERSION_LABEL[v], {"대기": max((r["pool"] for r in main_runs.get((v, top), [])), default=0)})
                              for v in versions],
@@ -347,7 +350,7 @@ def main():
             tl_series[v] = best["series"]
     if tl_series:
         charts.append(timeline_chart("chart4-timeline.svg",
-                                     f"{top:,} VU — 저장 완료 누적 (밀도 분산)", tl_series,
+                                     f"{top:,} VU - 저장 완료 누적 (밀도 분산)", tl_series,
                                      sub="기울기가 저장 처리율. 비동기는 더 급하게 올라가 더 빨리 끝난다"))
 
     # 표 5 - pool 민감도
@@ -369,7 +372,7 @@ def main():
             doc += [f"> 기준선: 같은 세션의 v2 = {ref:,.0f}ms. "
                     "pool 을 5배 늘려도 비동기의 3배 뒤에 머문다.", ""]
         charts.append(bar_chart("chart5-pool-sensitivity.svg",
-                                "pool 민감도 — 늘려도 비동기를 못 따라간다",
+                                "pool 민감도 - 늘려도 비동기를 못 따라간다",
                                 "동시 요청 수", "p99 (ms)",
                                 [(f"{l:,}", {"pool 10": med(p10.get(("v1", l), []), "p99"),
                                              "pool 50": med(p50.get(("v1", l), []), "p99")})
@@ -396,10 +399,10 @@ def main():
         doc += ["## 표 6. 수평 확장 (로컬, 앱 프로세스 2개)", "",
                 table(["동시 요청", "버전", "N1 (1대·pool10)", "N1-20 (1대·pool20)", "N2 (2대·각10)"], rows),
                 "",
-                "> **N2 vs N1-20 이 핵심** — 총 커넥션 20 으로 같고 앱 대수만 다르다.",
+                "> **N2 vs N1-20** - 총 커넥션 20 으로 같고 앱 대수만 다르다.",
                 "> 차이가 2~8% 로 노이즈 수준이면 **앱 계층은 병목이 아니다.**", ""]
         charts.append(bar_chart("chart6-scale.svg",
-                                f"수평 확장 — N2 vs N1-20 (총 커넥션 동일)",
+                                f"수평 확장 - N2 vs N1-20 (총 커넥션 동일)",
                                 "버전 / 부하", "p99 (ms)",
                                 [(f"{v} {l // 1000}k",
                                   {name: med(scale[name].get((v, l), []), "p99") for name, _ in arms})
@@ -418,7 +421,7 @@ def main():
                           f"**{d['lost']:,}**" if d["lost"] else "0",
                           "❌ 전량 유실" if d["lost"] else "✅ 유실 0"])
     if brows:
-        doc += ["## 표 7. 브로커 킬 — Redis AOF 모드별 유실", "",
+        doc += ["## 표 7. 브로커 킬 - Redis AOF 모드별 유실", "",
                 table(["AOF", "약속한 발급", "저장됨", "유실", "판정"], brows), "",
                 "> `everysec` 과 `always` 는 이 실험으로 구분되지 않는다. `docker kill` 은",
                 "> 컨테이너 프로세스만 죽이고 **호스트 페이지 캐시는 남는다.**", ""]
@@ -437,7 +440,7 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     with open(os.path.join(OUT, "TABLES.md"), "w") as f:
         f.write("\n".join(doc))
-    print(f"docs/results/TABLES.md  + SVG {len(charts)}개")
+    print(f"{os.path.relpath(OUT, ROOT)}/TABLES.md  + SVG {len(charts)}개")
     for c in charts:
         print(f"  {c}")
 

@@ -1,0 +1,1 @@
+{"ts":1786974452924,"instance":"app-1","dbIssued":10000,"dbRemaining":10000,"redisRemaining":0,"redisIssuedBits":10000,"inFlight":0,"inFlightPeak":200,"queueSize":0,"streamLen":10000,"streamPending":0,"relayEnabled":true,"poolActive":0,"poolPending":0,"poolTotal":10,"gcCount":72,"gcTimeMs":4025,"heapUsedMb":1404,"oldGenUsedMb":820}

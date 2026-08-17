@@ -60,3 +60,9 @@ docs/*
 
 ### 로컬 도구 ###
 .codegraph/
+
+### AWS 자격·IP ###
+*.pem
+aws/env.sh
+aws/measure.log
+!docs/results-aws/
